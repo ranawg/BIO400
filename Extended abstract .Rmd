@@ -1,0 +1,172 @@
+---
+title: "Magnolia tripetala: an Accidental Assisted Migration"
+author: "Rana Gahwagy"
+date: "5/20/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(ggplot2)
+library(janitor)
+library(tidyverse)
+library(readr)
+library(ggpubr)
+library(rstatix)
+library(PairedData)
+library("car")
+library(infer)
+library("ggpubr")
+library("sf")
+library(readxl)
+library(maptools)
+library(maps)
+library(ggforce)
+library(gganimate)
+library(leaflet)
+library("leafletCN")
+library(patchwork)
+
+```
+
+```{r}
+# data wrangling 
+Magnolia_Pop <- read_excel("Magnolia_population size & structure_FINAL_Oct2019.xlsx") %>% clean_names() %>%
+  rename(lat =lat_n, pop_size_est = population_size_estimate, seedling_percent = percent_seedling_1_4_m_tall_on_new_rootstalk, 
+         adult_percent = percent_adult_1_4_m_reproductive, adult_and_rootstock_percent = sum_adults_old_rootstock_percent_of_population, 
+         long = long_w, sapling_percent = percent_sapling_non_reproductive_1_4_m_on_new_rootstalk
+         ,old_regrowth_percent = percent_large_old_rootstock_but_young_regrowth, 
+         estb_pop_or_new_incipient  = etablished_population_or_new_incipient ) 
+# adding coment to variables 
+comment(Magnolia_Pop$adult_percent) <- ">1.4 m, reproductive"
+comment(Magnolia_Pop$seedling_percent) <- "<1.4 m tall, on new rootstalk"
+comment(Magnolia_Pop$sapling_percent) <- "(non-reproductive, >1.4 m, on new rootstalk"
+comment(Magnolia_Pop$adult_and_rootstock_percent) <- "ADULTS + OLD ROOTSTOCK % of population"
+# 
+Magnolia_Pop$status <- ifelse(grepl('Native', Magnolia_Pop$range_region), "native", "adventive")
+Magnolia_Pop$range <- ifelse(grepl('North', Magnolia_Pop$range_region), "north", "south")
+
+Magnolia_Pop$range[Magnolia_Pop$state == "MA"|Magnolia_Pop$state ==  "RI"| 
+                     Magnolia_Pop$state == "NY"| Magnolia_Pop$state == "CT"| Magnolia_Pop$status == "adventive"] <- "naturalized"
+Magnolia <- read_excel("Magnolia_neUS Naturalization_FINAL 20 sites_Oct2019.xlsx", 
+                                                                  col_types = c("numeric", "text", "text", 
+                                                                                "text", "numeric", "numeric", "numeric", 
+                                                                                "numeric", "skip", "skip")) %>% 
+  clean_names() %>%
+  mutate( state = as.factor(state),more_than_5_pop = rep(TRUE, 20)) %>%
+  rename(pop_site = naturalized_magtri_population_site_name, lat = lat_n,
+         ave_year_estb = mean_year_of_establishment_5_oldest_trees,
+         sd_5_oldest = standard_deviation_5_oldest)
+period <- as.factor(c("1950s", "1970s", "1970s", "1950s", "1970s", "1950s", "1980s",
+                      "1970s", "1970s", "1990s", "1980s", "1990s", "1990s", "1980s", "1980s", "1980s",
+                      "1980s", "1980s", "1960s", "1980s"))
+Magnolia$period <- period
+
+Magnolia_climate <- read_excel("Magnolia_neUS Naturalization_climate_April21.xlsx") %>%
+  clean_names() %>%
+  mutate( state = as.factor(state),more_than_5_pop = rep(TRUE, 20)) %>%
+  rename(pop_site = naturalized_magtri_population_site_name, 
+         lat = lat_n,
+         ave_year_estb = mean_year_of_establishment_5_oldest_trees,
+         sd_5_oldest = standard_deviation_5_oldest) %>%
+  dplyr::select(-notes1_established_vs_incipient)
+Magnolia_climate$period <- period
+
+```
+
+# Key words 
+Magnolia tripetala, Assisted Migration, Climate Change
+# Abstract 
+
+
+# Introduction  
+Although it has a tropical look and feel, Magnolia tripetala- also known as the umbrella tree- is native to the southeastern United States. Its native range expands from Florida, Alabama, and Mississippi to Maryland, western Pennsylvania, West Virginia, and Ohio. Magnolia trees are dominantly pollinated by beetles and other insects (1) but were brought by chance through humane activity, where it was kept in private settings. However, in recent decades, growing populations have been observed in eastern Pennsylvania, New York, Connecticut, Rhode Island, and Massachusetts. Some even question "why it is not indigenous to this region [Springfeild, MA] " (2).  A working hypothesis is that climate change made the escape to the wilderness possible since there was a time lag between when they were brought to Northeast U.S. and when they first escaped (3). This makes Magnolia a unique case study of assisted migration, which means relocating plants to new habitats to avert the risks associated with rapid climate change (4). Since it is a controversial conservation approach, Magnolia provides an example of what happens if we take this approach by direct observation since it was translocated, even if by accident. 
+
+# Methods   
+There were two main data sets collected. The first was population estimates assembled in 2016 in various ranges (native and adventive) that included percentages of seedlings, saplings, adults, rootstock, and total size estimate. There were 40  sites in total, 10 of which were in its southern native range, 10 were in its northern native range, and 20 were in the naturalized range. It is important to knote that the poplution sizes are divergent (ranges from from 1 to 2595 indiviulas) 
+
+The second dataset was of populations from adventive ranges only which included their average year established dated from tree cores. The data analysis was conducted in R using various visualization and statistical methods such as Kruskal-Wallis and Dunn's tests.  
+
+## Where are the examined sites of Magnolia tripetala
+```{r}
+pal <- colorQuantile("Blues", Magnolia_Pop$pop_size_est , n = 7)
+factpal_stat <- colorFactor(topo.colors(2), Magnolia_Pop$status)
+factpal_per <- colorFactor(topo.colors(5), Magnolia_climate$period)
+
+leaflet(data = Magnolia_Pop) %>% addProviderTiles("CartoDB.DarkMatter") %>%
+  addCircleMarkers(
+    lng = ~long, lat= ~lat,
+    color = ~pal(pop_size_est),
+    stroke = FALSE, fillOpacity = 0.8, 
+    label=~as.character(site_name), 
+    radius = ~log(pop_size_est+0.5), group = "Population Size") %>%
+  addCircleMarkers(
+    lng = ~long, lat= ~lat,
+    color = ~factpal_stat(status),
+    stroke = FALSE, fillOpacity = 0.8, 
+    label=~as.character(site_name), 
+    radius =  ~log(pop_size_est+0.5), group = "Status") %>%
+  addLayersControl(
+    position = "topright",
+    baseGroups = c("Population Size", "Status"),
+    options = layersControlOptions(collapsed = FALSE)
+  )  %>%
+  addLegend("bottomright", pal = pal, values = ~pop_size_est,
+            title = "Population Size",
+            opacity = 1, group = "Population Size") %>%
+  addLegend("bottomright",pal = factpal_stat, values = ~as.factor(status), opacity = 1, 
+            title = "Status", group = "Status")
+```
+
+# Results   
+
+The estimate of the population sizes for the northern native range, the southern native range, and the naturalized range is plotted in Figure 1 where the naturalized communities have larger population estimates than both northern and southern communities. There is a significant difference between the average population size in the ranges (p-value = 0.0000104) using the Kruskal-Wallis test. Specifically, there is a significant difference in the averages between both the northern and southern range with a p-value of 0.00000182 and the naturalized and southern range with a p-value of 0.00000182 (using Dunn's Test). 
+
+```{r}
+ggplot(Magnolia_Pop, aes(x = range, y= pop_size_est)) +
+  geom_boxplot()+ 
+    labs(caption = "Figure 1: Populaation size estimate for each of the ranges", x= "Range", y = "Population Size Estimate")+ theme_bw()  +
+    theme(plot.caption = element_text(hjust = 0, size = 14))
+```
+
+We noticed a few stark differences in the population distribution of life stage structure among the different ranges. Magnolia trees in the south have been the lowest median (0% for seedlings and saplings) but have the widest distribution for adults (from 0% to 100%) as seen in Figure 2. This indicates that the populations in the south are dying because they are composed of mostly adults who have not been productive recently. On the other hand, the naturalized populations have the highest seedling (>40%) which means that they are thriving. Interestingly, the native northern trees seem to be in equilibrium, where they have similar percentages for each of their life stages. The differences between those populations are also confirmed statistically using a Kruskal-Wallis test in order to test the null hypothesis that there are no differences between the averages of each of the ranges and each of the life stages. We found that there is indeed a significant difference between seedling (p-value = 0.000152) and sapling (p-value = 0.000268) percentages and the three ranges but not for adults (p-value = 0.0652).             
+
+```{r}
+x1 <- ggplot(Magnolia_Pop, aes(x = range, y= adult_percent)) +
+  geom_boxplot() + theme_bw() +labs(y= "% Adult")
+x2 <- ggplot(Magnolia_Pop, aes(x = range, y= sapling_percent)) +
+  geom_boxplot() + theme_bw()+labs(y= "% Sapling")
+x3 <- ggplot(Magnolia_Pop, aes(x = range, y= seedling_percent)) +
+  geom_boxplot()+ theme_bw() +labs(y= "% seeding")
+x1+ x2 +x3+ 
+    labs(tag = "Figure 2: Populaation Life Stage Structure Distribution for each of\n the ranges") +
+    coord_cartesian(clip = "off") +
+    theme(plot.margin = margin(t = 5, r = 5, b = 40, l = 10),
+          plot.tag.position = c(-0.8, -0.1))
+```
+
+
+
+![GIF](goo.gif)
+
+
+
+```{r}
+
+```
+
+
+
+# conclusion   
+
+# refrences   
+(1): Thien, L. (1974). Floral Biology of Magnolia. American Journal of Botany, 61(10), 1037-1045. doi:10.2307/2441921   
+(2): Stone, G. (1913). MAGNOLIA TRIPETALA IN SPRINGFIELD, MASSACHUSETTS. Rhodora, 15(171), 63-63. Retrieved May 20, 2021, from http://www.jstor.org/stable/23296611   
+(3): Bellemare, J., & Deeg, C. (2015). HORTICULTURAL ESCAPE AND NATURALIZATION OF MAGNOLIA TRIPETALA IN WESTERN MASSACHUSETTS: BIOGEOGRAPHIC CONTEXT AND POSSIBLE RELATIONSHIP TO RECENT CLIMATE CHANGE. Rhodora, 117(971), 371-383. Retrieved May 20, 2021, from http://www.jstor.org/stable/24777331    
+(4): Minteer, B., & Collins, J. (2010). Move it or lose it? The ecological ethics of relocating species under climate change. Ecological Applications, 20(7), 1801-1804. Retrieved May 20, 2021, from http://www.jstor.org/stable/25741348   
+
+
+
+
+
